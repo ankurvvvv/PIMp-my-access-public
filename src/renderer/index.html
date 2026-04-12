@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PIMp MY ACCESS</title>
+    <link rel="icon" type="image/png" href="../../assets/icons/app.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-one"></div>
+    <div class="bg-orb orb-two"></div>
+
+    <div class="app-frame">
+      <header class="titlebar" id="titlebar">
+        <div class="brand drag-region">
+          <img class="brand-logo" src="../../assets/icons/app.png" alt="PIMp MY ACCESS" />
+          <span class="brand-title">PIMp MY ACCESS</span>
+          <span class="brand-sub">Azure Privileged Access</span>
+        </div>
+
+        <div class="titlebar-actions no-drag">
+          <button id="settingsToggleBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+          <button id="windowMinBtn" class="icon-btn" title="Minimize" aria-label="Minimize">─</button>
+          <button id="windowMaxBtn" class="icon-btn" title="Maximize" aria-label="Maximize">▢</button>
+          <button id="windowCloseBtn" class="icon-btn danger" title="Close" aria-label="Close">✕</button>
+        </div>
+      </header>
+
+      <aside id="settingsDrawer" class="settings-drawer" aria-hidden="true">
+        <div class="drawer-header">
+          <h2>Settings</h2>
+          <button id="settingsCloseBtn" class="icon-btn" aria-label="Close settings">✕</button>
+        </div>
+        <!--
+          Auth mode / BYO / tenant override controls are intentionally disabled for now.
+          Current product direction is one-click sign-in only.
+          We will re-introduce configurable auth modes in a hardened public-release design.
+        -->
+
+        <section class="update-card" aria-label="Application updates">
+          <h2>Updates</h2>
+          <div class="row">
+            <button id="checkUpdatesBtn" class="ghost">Check for updates</button>
+            <button id="restartUpdateBtn" hidden>Restart to update</button>
+          </div>
+          <p id="updateStatus" class="muted status-line">Update service is idle.</p>
+          <p id="updateMeta" class="muted status-line update-meta"></p>
+        </section>
+
+        <section class="developer-card" aria-label="Developer information">
+          <h2>About Developer</h2>
+          <p class="developer-line"><strong>Name:</strong> <span id="developerName"></span></p>
+          <p class="developer-line"><strong>Organization:</strong> <span id="developerOrg"></span></p>
+          <p class="developer-line"><strong>Email:</strong> <a id="developerEmail" href="#"></a></p>
+          <p class="developer-line"><strong>Repository:</strong> <a id="developerRepo" href="#" target="_blank" rel="noreferrer"></a></p>
+          <p class="developer-line"><strong>Build Version:</strong> <span id="developerBuildVersion"></span></p>
+        </section>
+      </aside>
+      <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true"></div>
+
+      <main class="app-shell">
+        <section class="layout">
+          <aside class="panel stack">
+            <section class="card">
+              <h2>Sign In</h2>
+              <div class="row">
+                <button id="loginBtn" class="primary">Sign in to Azure</button>
+              </div>
+              <p id="authStatus" class="muted status-line">Not signed in</p>
+            </section>
+
+            <section class="card">
+              <h2>Activation</h2>
+              <div class="row activation-control">
+                <input id="durationHours" type="range" min="0.5" max="8" step="0.5" value="1" />
+                <div class="duration-box-wrap">
+                  <input id="durationHoursBox" type="number" min="0.5" max="8" step="0.5" value="1" aria-label="Selected duration" />
+                  <span id="durationHoursUnit" class="duration-unit">hr</span>
+                </div>
+              </div>
+              <div class="row">
+                <textarea id="justification" rows="3" placeholder="Reason for activation"></textarea>
+              </div>
+              <div id="activationStatus" class="status-line activation-status" aria-live="polite">
+                <div class="activation-status-line">
+                  <span id="activationHumanMessage" class="activation-human-message"></span>
+                  <span
+                    id="activationRawToggle"
+                    class="activation-raw-toggle"
+                    role="button"
+                    tabindex="0"
+                    aria-expanded="false"
+                    aria-label="Show raw message"
+                    hidden
+                    >&#9656;</span
+                  >
+                </div>
+                <div id="activationRawMessage" class="activation-raw-message" hidden></div>
+              </div>
+            </section>
+          </aside>
+
+          <section class="panel roles-sections">
+            <section class="card roles-card">
+              <div class="row roles-header">
+                <div>
+                  <h2>Eligible Roles</h2>
+                  <p class="muted roles-helper">Filter and activate your currently eligible roles.</p>
+                </div>
+                <div class="row roles-controls">
+                  <div class="roles-family-strip tenant-family-strip" role="tablist" aria-label="Tenant tabs">
+                    <button type="button" class="tenant-preset-btn tenant-tab active" data-tenant-key="nuance" aria-pressed="true">Nuance</button>
+                    <button type="button" class="tenant-preset-btn tenant-tab" data-tenant-key="healthcareCloud" aria-pressed="false">HealthCare Cloud</button>
+                  </div>
+                  <div class="roles-family-strip" role="tablist" aria-label="Role families">
+                    <div class="role-tab active" role="tab" tabindex="0" data-family="entra" aria-selected="true">Entra Roles</div>
+                    <div class="role-tab" role="tab" tabindex="0" data-family="azureResource" aria-selected="false">Azure Resources</div>
+                    <div class="role-tab" role="tab" tabindex="0" data-family="group" aria-selected="false">Groups</div>
+                  </div>
+                </div>
+              </div>
+              <div id="rolesLoadingIndicator" class="roles-loading-indicator" aria-hidden="true"></div>
+              <div class="table-wrap">
+                <table class="eligible-roles-table">
+                  <thead>
+                    <tr id="rolesHeaderRow"></tr>
+                  </thead>
+                  <tbody id="rolesBody"></tbody>
+                </table>
+              </div>
+              <div class="roles-footer">
+                <p id="rolesStatus" class="muted roles-status-line">Sign in to load eligible roles.</p>
+                <button id="refreshBtn" class="ghost subtle-refresh">Refresh Roles</button>
+              </div>
+            </section>
+
+            <section class="card active-roles-card">
+              <div class="row roles-header">
+                <div>
+                  <h2>Active Roles</h2>
+                  <p class="muted roles-helper">Grouped by family with role details and expiry.</p>
+                </div>
+              </div>
+              <div id="activeRolesList" class="active-roles-list"></div>
+              <div class="roles-footer">
+                <p id="activeRolesStatus" class="muted roles-status-line">No active roles loaded.</p>
+              </div>
+            </section>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

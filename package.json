@@ -1,0 +1,68 @@
+{
+  "name": "pimmefast",
+  "version": "2026.3.4",
+  "productName": "PIMp MY ACCESS",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && node scripts/copy-renderer.js",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never",
+    "release:github": "npm run build && electron-builder --win nsis --publish always",
+    "dev:build": "tsc -p tsconfig.main.json --watch",
+    "dev": "concurrently -k \"npm:dev:build\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on dist/main/main.js && electron .",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit",
+    "progress": "node scripts/update-progress.js",
+    "progress:start": "node scripts/update-progress.js --start",
+    "progress:complete": "node scripts/update-progress.js --complete",
+    "progress:note": "node scripts/update-progress.js --note",
+    "changelog:reminder": "node -e \"console.log('Update CHANGELOG.md under [Unreleased] for every user-visible, behavior, or fix change before commit.')\""
+  },
+  "keywords": [],
+  "author": "Ankur Vishwakarma (Microsoft) <ankurankur20m@gmail.com>",
+  "license": "ISC",
+  "description": "Lightning fast az pim activation",
+  "homepage": "https://github.com/ankurvvvv",
+  "build": {
+    "appId": "com.microsoft.pimmefast",
+    "win": {
+      "icon": "assets/icons/app.ico"
+    },
+    "nsis": {
+      "installerIcon": "assets/icons/app.ico",
+      "uninstallerIcon": "assets/icons/app.ico",
+      "installerHeaderIcon": "assets/icons/app.ico"
+    },
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "PIMp-MY-ACCESS-${version}-${os}-${arch}.${ext}",
+    "copyright": "Copyright (c) 2026 Ankur Vishwakarma (Microsoft)",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ankurvvvv",
+        "repo": "PIMp-MY-ACCESS",
+        "releaseType": "release"
+      }
+    ],
+    "files": [
+      "**/*",
+      "!misc/**/*"
+    ]
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.0",
+    "@azure/msal-node": "^5.1.0",
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
+    "typescript": "^5.9.3",
+    "wait-on": "^9.0.4"
+  }
+}
