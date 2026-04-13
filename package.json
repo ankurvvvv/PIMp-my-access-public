@@ -1,6 +1,6 @@
 {
   "name": "pimmefast",
-  "version": "2026.3.4",
+  "version": "2026.4.1",
   "productName": "PIMp MY ACCESS",
   "main": "dist/main/main.js",
   "scripts": {

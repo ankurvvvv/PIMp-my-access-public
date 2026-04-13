@@ -75,8 +75,8 @@ class UpdateService {
 
     this.config = {
       channel: configuredChannel || 'latest',
-      startupDelayMs: parsePositiveInt(process.env.PIMMEFAST_UPDATE_STARTUP_DELAY_MS, 12000),
-      checkIntervalMs: parsePositiveInt(process.env.PIMMEFAST_UPDATE_CHECK_INTERVAL_MS, 4 * 60 * 60 * 1000),
+      startupDelayMs: parsePositiveInt(process.env.PIMMEFAST_UPDATE_STARTUP_DELAY_MS, 8000),
+      checkIntervalMs: parsePositiveInt(process.env.PIMMEFAST_UPDATE_CHECK_INTERVAL_MS, 5 * 60 * 1000),
       disabled: parseDisableFlag(process.env.PIMMEFAST_DISABLE_UPDATES)
     };
     this.configWarnings = this.getConfigWarnings(this.config);
