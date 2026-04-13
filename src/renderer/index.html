@@ -99,6 +99,10 @@
                 <div id="activationRawMessage" class="activation-raw-message" hidden></div>
               </div>
             </section>
+
+            <footer class="panel-watermark">
+              <span>© 2026 Ankur Vishwakarma · <span id="watermarkVersion">v2026.3.4</span></span>
+            </footer>
           </aside>
 
           <section class="panel roles-sections">
@@ -150,6 +154,12 @@
           </section>
         </section>
       </main>
+
+      <div id="updateToast" class="update-toast" hidden>
+        <span id="updateToastMessage" class="update-toast-message"></span>
+        <button id="updateToastAction" class="update-toast-action">Restart to update</button>
+        <button id="updateToastDismiss" class="update-toast-dismiss icon-btn" aria-label="Dismiss">✕</button>
+      </div>
     </div>
 
     <script src="./renderer.js"></script>

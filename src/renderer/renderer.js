@@ -56,6 +56,10 @@ const rolesHeaderRow = document.getElementById('rolesHeaderRow');
 const settingsDrawer = document.getElementById('settingsDrawer');
 const settingsBackdrop = document.getElementById('settingsBackdrop');
 const settingsToggleBtn = document.getElementById('settingsToggleBtn');
+const updateToast = document.getElementById('updateToast');
+const updateToastMessage = document.getElementById('updateToastMessage');
+const updateToastAction = document.getElementById('updateToastAction');
+const updateToastDismiss = document.getElementById('updateToastDismiss');
 const settingsCloseBtn = document.getElementById('settingsCloseBtn');
 const windowMinBtn = document.getElementById('windowMinBtn');
 const windowMaxBtn = document.getElementById('windowMaxBtn');
@@ -68,6 +72,7 @@ const developerOrg = document.getElementById('developerOrg');
 const developerEmail = document.getElementById('developerEmail');
 const developerRepo = document.getElementById('developerRepo');
 const developerBuildVersion = document.getElementById('developerBuildVersion');
+const watermarkVersion = document.getElementById('watermarkVersion');
 
 const APP_DEVELOPER_INFO = {
   name: 'Ankur Vishwakarma',
@@ -102,6 +107,17 @@ function renderUpdateState(updateState) {
     const canRestart = Boolean(updateState.canRestartToUpdate);
     restartUpdateBtn.hidden = !canRestart;
     restartUpdateBtn.disabled = !canRestart;
+  }
+
+  if (updateToast) {
+    if (updateState.phase === 'downloaded' && updateState.canRestartToUpdate) {
+      if (updateToastMessage) {
+        updateToastMessage.textContent = `Update ${updateState.version || ''} is ready.`;
+      }
+      updateToast.hidden = false;
+    } else {
+      updateToast.hidden = true;
+    }
   }
 
   if (updateMeta) {
@@ -224,6 +240,7 @@ function renderDeveloperInfo() {
       .getAppVersion()
       .then((version) => {
         developerBuildVersion.textContent = version;
+        if (watermarkVersion) watermarkVersion.textContent = `v${version}`;
       })
       .catch(() => {
         developerBuildVersion.textContent = 'Unknown';
@@ -941,6 +958,20 @@ renderActiveRoles();
 renderDeveloperInfo();
 initializeUpdateControls();
 applyTenantSelection(selectedTenantKey);
+
+if (updateToastAction) {
+  updateToastAction.addEventListener('click', async () => {
+    try {
+      await getPimClient().restartToInstall();
+    } catch {}
+  });
+}
+
+if (updateToastDismiss) {
+  updateToastDismiss.addEventListener('click', () => {
+    if (updateToast) updateToast.hidden = true;
+  });
+}
 
 settingsToggleBtn.addEventListener('click', () => {
   const isOpen = settingsDrawer.classList.contains('open');

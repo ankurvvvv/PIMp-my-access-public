@@ -122,7 +122,7 @@ class UpdateService {
     }
 
     autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.autoInstallOnAppQuit = true;
 
     autoUpdater.channel = this.config.channel;
     autoUpdater.allowPrerelease = false;
