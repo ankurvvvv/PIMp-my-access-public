@@ -68,6 +68,8 @@ class UpdateService {
     canRestartToUpdate: false
   };
 
+  private stateListeners: Array<(state: UpdateState) => void> = [];
+
   constructor() {
     const configuredChannel = String(process.env.PIMMEFAST_UPDATE_CHANNEL ?? '').trim().toLowerCase();
 
@@ -290,6 +292,22 @@ class UpdateService {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('updater:state', this.state);
     }
+
+    for (const listener of this.stateListeners) {
+      try {
+        listener(this.state);
+      } catch {}
+    }
+  }
+
+  onStateChange(listener: (state: UpdateState) => void): () => void {
+    this.stateListeners.push(listener);
+    return () => {
+      const index = this.stateListeners.indexOf(listener);
+      if (index >= 0) {
+        this.stateListeners.splice(index, 1);
+      }
+    };
   }
 
   private getErrorMessage(error: unknown): string {

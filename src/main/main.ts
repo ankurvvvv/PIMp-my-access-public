@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { registerPimHandlers } from './ipc/pimHandlers';
+import { initializeTray, refreshTrayMenu } from './tray/trayService';
 import { updateService } from './update/updateService';
 
 let mainWindow: BrowserWindow | null = null;
@@ -47,7 +48,9 @@ function createWindow(): void {
 app.whenReady().then(() => {
   registerPimHandlers();
   createWindow();
+  initializeTray();
   updateService.initialize();
+  updateService.onStateChange(() => refreshTrayMenu());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

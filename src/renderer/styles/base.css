@@ -1,0 +1,58 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+
+:root {
+  color-scheme: dark;
+  --bg-1: #3a3d45;
+  --bg-2: #24272d;
+  --surface: #2d3037;
+  --surface-2: #262a31;
+  --surface-3: #20242a;
+  --text: #f2f4f7;
+  --muted: #b5bcc7;
+  --line: #4f5663;
+  --line-soft: #626a79;
+  --accent: #1b77d0;
+  --accent-soft: #58a5e8;
+  --danger: #d6475e;
+  --shadow: 0 20px 42px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(70rem 30rem at -12% -15%, rgba(255, 255, 255, 0.1) 0%, transparent 58%),
+    radial-gradient(56rem 28rem at 115% 8%, rgba(255, 255, 255, 0.08) 0%, transparent 62%),
+    linear-gradient(145deg, var(--bg-1), var(--bg-2));
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.bg-orb {
+  position: fixed;
+  border-radius: 999px;
+  filter: blur(72px);
+  opacity: 0.3;
+  z-index: -1;
+}
+
+.orb-one {
+  width: 320px;
+  height: 320px;
+  background: rgba(255, 255, 255, 0.26);
+  top: -120px;
+  left: -100px;
+}
+
+.orb-two {
+  width: 360px;
+  height: 360px;
+  background: rgba(125, 201, 255, 0.32);
+  right: -130px;
+  top: 180px;
+}
