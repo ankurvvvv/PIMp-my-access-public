@@ -397,6 +397,16 @@ td:last-child button {
   font-size: 0.72rem;
 }
 
+/* Small hint reminding the user that the app doesn't auto-sync — they must
+ * click Refresh to pull changes made outside this app (e.g. portal-side
+ * deactivations, admin revokes). Sits between the status line and Refresh. */
+.roles-refresh-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.68rem;
+  font-style: italic;
+  opacity: 0.78;
+}
+
 .subtle-refresh {
   min-height: 1.8rem;
   font-size: 0.72rem;
@@ -453,6 +463,7 @@ td:last-child button {
   font-size: 0.86rem;
   font-weight: 600;
   color: #edf3fb;
+  text-align: left;
 }
 
 .active-role-context,
@@ -461,6 +472,7 @@ td:last-child button {
   font-size: 0.73rem;
   color: #c8d0dd;
   overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .active-role-timer {
@@ -471,6 +483,52 @@ td:last-child button {
   border: 1px solid #ef8897;
   padding: 0.08rem 0.36rem;
   white-space: nowrap;
+}
+
+/* Right-side cluster on each active role's top row: holds the optional
+ * expiry badge and the Deactivate button side-by-side, kept tight to the
+ * role name so the card doesn't stretch vertically. */
+.active-role-topline-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+/* Compact Deactivate button — inline with the role name. Kept small and
+ * destructive-styled so it doesn't dominate the card. The global `button`
+ * rule paints a blue 3–5px box-shadow underline on every button; we replace
+ * it here with a red equivalent so the pressed/raised look matches the
+ * destructive border. */
+.active-role-deactivate-btn {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #ffd4d8;
+  background: transparent;
+  border: 1px solid #8d2232;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 90ms ease, transform 90ms ease;
+  white-space: nowrap;
+  box-shadow: 0 2px 0 #5e1622, 0 3px 6px rgba(141, 34, 50, 0.22);
+}
+
+.active-role-deactivate-btn:hover {
+  background: #8d2232;
+  color: #fff;
+  box-shadow: 0 3px 0 #5e1622, 0 5px 10px rgba(141, 34, 50, 0.32);
+}
+
+.active-role-deactivate-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #5e1622, 0 2px 5px rgba(141, 34, 50, 0.22);
+}
+
+.active-role-deactivate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: 0 2px 0 #5e1622, 0 3px 6px rgba(141, 34, 50, 0.22);
 }
 
 @keyframes roles-loading-slide {
@@ -703,4 +761,163 @@ td:last-child button {
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+/* ── "What's new" / changelog modal ──
+ * A centered, scrollable dialog that overlays everything else. Auto-opens
+ * once after each version bump and on demand from the Settings drawer.
+ * The backdrop is a separate element so we can attach its own click handler
+ * without competing with z-index stacking inside the modal. */
+.changelog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 12, 20, 0.62);
+  z-index: 80;
+}
+
+.changelog-backdrop[hidden] {
+  display: none;
+}
+
+.changelog-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, 92vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #1f2532, #181c25);
+  border: 1px solid #3a4150;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  z-index: 90;
+  text-align: left;
+}
+
+.changelog-modal[hidden] {
+  display: none;
+}
+
+.changelog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.95rem;
+  border-bottom: 1px solid #2a2f3a;
+}
+
+.changelog-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #f1f5fb;
+  text-align: left;
+}
+
+.changelog-body {
+  overflow-y: auto;
+  padding: 0.85rem 0.95rem;
+  flex: 1 1 auto;
+  color: #d6dde8;
+  text-align: left;
+}
+
+.changelog-empty {
+  margin: 0.5rem 0;
+  font-style: italic;
+  color: #a4adbb;
+  text-align: left;
+}
+
+.changelog-entry + .changelog-entry {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed #2f3540;
+}
+
+.changelog-entry-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+  color: #f1f5fb;
+  text-align: left;
+}
+
+.changelog-entry-date {
+  font-weight: 400;
+  font-size: 0.74rem;
+  color: #8a93a4;
+  margin-left: 0.4rem;
+}
+
+.changelog-current-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #cfe8ff;
+  background: #16466b;
+  border: 1px solid #2a76b3;
+  padding: 0.05rem 0.35rem;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.changelog-section-heading {
+  margin: 0.6rem 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9fc1e8;
+  text-align: left;
+}
+
+.changelog-section-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  text-align: left;
+}
+
+.changelog-section-list li {
+  margin: 0.18rem 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #d6dde8;
+  text-align: left;
+}
+
+.changelog-section-list code {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  background: #0e131c;
+  border: 1px solid #2a2f3a;
+  padding: 0 0.22rem;
+  font-size: 0.72rem;
+  border-radius: 2px;
+}
+
+.changelog-section-list strong {
+  color: #f1f5fb;
+}
+
+.changelog-link {
+  color: #6fb6ff;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.changelog-link:hover {
+  color: #a3d2ff;
+}
+
+.changelog-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.7rem 0.95rem;
+  border-top: 1px solid #2a2f3a;
+}
+
+.changelog-card {
+  margin-top: 0.85rem;
 }

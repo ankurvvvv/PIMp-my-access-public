@@ -22,7 +22,7 @@ function createWindow(): void {
     height: 800,
     minWidth: 980,
     minHeight: 640,
-    title: `PIMp MY ACCESS | ${appVersionTag} | Ankur Vishwakarma (Microsoft)`,
+    title: `PIMp my access | ${appVersionTag} | Ankur Vishwakarma (Microsoft)`,
     icon: iconPath,
     frame: false,
     roundedCorners: false,

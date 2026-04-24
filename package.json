@@ -1,7 +1,7 @@
 {
   "name": "pimmefast",
-  "version": "2026.4.2",
-  "productName": "PIMp MY ACCESS",
+  "version": "2026.4.3",
+  "productName": "PIMp my access",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.main.json && node scripts/copy-renderer.js",

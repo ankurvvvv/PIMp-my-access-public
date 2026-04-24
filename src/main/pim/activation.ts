@@ -8,6 +8,7 @@ import type { ArmRoleEligibility, ArmCollection } from './roleListing';
 import type {
   ActivateRoleRequest,
   ArmActivationResult,
+  DeactivateRoleRequest,
   GraphActivationResult,
   PimTenantKey
 } from './types';
@@ -208,4 +209,76 @@ async function getArmRequestorPrincipalId(auth: DeviceCodeAuth, tenantKey: PimTe
   } catch {
     throw new Error('Failed to resolve requestor principal ID from ARM token. Sign in again and retry.');
   }
+}
+
+// ── Deactivation ──
+//
+// Ends an active PIM assignment early. Same family routing as activateRole:
+//   - Entra: Graph self-deactivate request.
+//   - Group: Graph group self-deactivate request.
+//   - Azure resource: ARM self-deactivate request at the role's scope.
+//
+// On success the per-tenant Azure role cache is cleared so the next list call
+// returns fresh state. The renderer also mutates state locally for instant UI.
+export async function deactivateRole(
+  request: DeactivateRoleRequest,
+  graph: GraphClient,
+  arm: ArmClient,
+  auth: DeviceCodeAuth,
+  tenantKey: PimTenantKey
+): Promise<{ requestId: string; status: string }> {
+  if (request.family === 'entra') {
+    const [principalId, roleDefinitionId, directoryScopeId] = request.roleId.split('|');
+    const result = await graph.post<GraphActivationResult>('/roleManagement/directory/roleAssignmentScheduleRequests', {
+      action: 'selfDeactivate',
+      principalId,
+      roleDefinitionId,
+      directoryScopeId: directoryScopeId || '/'
+    });
+
+    return { requestId: result.id, status: result.status };
+  }
+
+  if (request.family === 'group') {
+    const [principalId, groupId, accessId] = request.roleId.split('|');
+    const result = await graph.post<GraphActivationResult>('/identityGovernance/privilegedAccess/group/assignmentScheduleRequests', {
+      action: 'selfDeactivate',
+      principalId,
+      groupId,
+      accessId
+    });
+
+    return { requestId: result.id, status: result.status };
+  }
+
+  // Azure resource role — same scope/principal resolution as activation, but
+  // requestType: 'SelfDeactivate'. No duration, no justification.
+  const azureTarget = parseAzureActivationTarget(request.roleId);
+  const { scope } = azureTarget;
+
+  if (!scope.startsWith('/')) {
+    throw new Error('Invalid Azure role scope. Refresh the role list and retry.');
+  }
+
+  const resolved = await resolveAzureActivationTarget(arm, azureTarget);
+  const requestorPrincipalId = await getArmRequestorPrincipalId(auth, tenantKey);
+
+  if (!resolved.roleDefinitionId) {
+    throw new Error('Missing Azure role definition ID. Refresh the role list and retry.');
+  }
+
+  const requestId = randomUUID();
+  const result = await arm.put<ArmActivationResult>(
+    `${scope}/providers/Microsoft.Authorization/roleAssignmentScheduleRequests/${requestId}?api-version=2020-10-01`,
+    {
+      properties: {
+        requestType: 'SelfDeactivate',
+        principalId: requestorPrincipalId,
+        roleDefinitionId: resolved.roleDefinitionId
+      }
+    }
+  );
+
+  clearAzureRolesCache(tenantKey);
+  return { requestId: result.name ?? requestId, status: result.properties?.status ?? 'submitted' };
 }

@@ -4,12 +4,13 @@ import { GraphClient } from '../api/graphClient';
 import { AuthSettingsStore } from '../settings/authSettingsStore';
 import { BUNDLED_CLIENT_ID, TENANT_KEY_TO_ID, ALL_TENANTS, toTenantKey } from './tenantConfig';
 import { listEntraEligibleRoles, listGroupEligibleRoles, listAzureResourceEligibleRoles } from './roleListing';
-import { activateRole as performActivation } from './activation';
+import { activateRole as performActivation, deactivateRole as performDeactivation } from './activation';
 import type {
   ActivateRoleRequest,
   AuthLoginResult,
   AuthSettings,
   AuthSettingsValidationResult,
+  DeactivateRoleRequest,
   PimRole,
   PimRoleFilter,
   PimTenantKey
@@ -89,6 +90,15 @@ export class PimService {
     const arm = this.getArmClientForTenant(tenantKey);
 
     return performActivation(request, graph, arm, this.auth, tenantKey);
+  }
+
+  // Self-deactivate an active PIM role. Mirrors activateRole's tenant routing.
+  async deactivateRole(request: DeactivateRoleRequest): Promise<{ requestId: string; status: string }> {
+    const tenantKey = toTenantKey(request.tenantKey) ?? 'nuance';
+    const graph = this.getGraphClientForTenant(tenantKey);
+    const arm = this.getArmClientForTenant(tenantKey);
+
+    return performDeactivation(request, graph, arm, this.auth, tenantKey);
   }
 
   private async listEligibleRolesForTenant(tenantKey: PimTenantKey, family?: PimRoleFilter['family']): Promise<PimRole[]> {
