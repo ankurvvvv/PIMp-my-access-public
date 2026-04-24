@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   ActivateRoleRequest,
   AuthLoginResult,
+  DeactivateRoleRequest,
   PimRole,
   PimRoleFilter
 } from './pim/types';
@@ -96,7 +97,31 @@ const api = {
     ipcRenderer.invoke('pim:listEligibleRoles', filter),
 
   activateRole: (request: ActivateRoleRequest): Promise<{ requestId: string; status: string }> =>
-    ipcRenderer.invoke('pim:activateRole', request)
+    ipcRenderer.invoke('pim:activateRole', request),
+
+  deactivateRole: (request: DeactivateRoleRequest): Promise<{ requestId: string; status: string }> =>
+    ipcRenderer.invoke('pim:deactivateRole', request),
+
+  // ── Changelog / "What's new" ──
+  getChangelog: (): Promise<{
+    entries: Array<{
+      version: string;
+      date: string;
+      sections: Array<{ heading: string; items: string[] }>;
+    }>;
+    found: boolean;
+    sourcePath: string;
+    currentVersion: string;
+  }> => ipcRenderer.invoke('changelog:get'),
+
+  getLastSeenChangelogVersion: (): Promise<string> =>
+    ipcRenderer.invoke('changelog:getLastSeenVersion'),
+
+  markChangelogSeen: (version?: string): Promise<void> =>
+    ipcRenderer.invoke('changelog:markSeen', version),
+
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke('shell:openExternal', url)
 };
 
 try {

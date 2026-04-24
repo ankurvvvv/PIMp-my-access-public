@@ -27,12 +27,27 @@ export const state = {
   },
   rolesCacheUntil: 0,
   activeRolesLoadToken: 0,
-  isRolesLoading: false
+  isRolesLoading: false,
+  // Flipped true after the first successful post-login role fetch completes.
+  // Used by fetchAllRoles to decide between skeleton (first load) and silent
+  // (subsequent manual refresh) rendering modes.
+  isFirstLoadDone: false,
+  // Map<roleId, timeoutHandle> — one setTimeout per active role, scheduled to
+  // fire at that role's endTimeIso so the UI flips to "Expired" instantly
+  // without needing the user to click Refresh.
+  expiryTimers: new Map()
 };
 
 export const ROLE_FAMILIES = ['entra', 'azureResource', 'group'];
 export const TENANT_KEYS = ['nuance', 'healthcareCloud'];
 export const ROLES_CACHE_TTL_MS = 90 * 1000;
+// Grace window during which a locally-flipped (optimistically activated) role
+// is preserved across a Refresh even if Azure's listing endpoint has not yet
+// caught up with it. Azure ARM's roleAssignmentScheduleInstances?asTarget()
+// view is eventually consistent and can lag 30–90s after a successful
+// activation. Without this grace, a user who clicks Refresh immediately after
+// activating an Azure role would see the card disappear.
+export const OPTIMISTIC_GRACE_MS = 90 * 1000;
 
 export const dom = {
   authStatus: document.getElementById('authStatus'),
@@ -73,7 +88,14 @@ export const dom = {
   developerEmail: document.getElementById('developerEmail'),
   developerRepo: document.getElementById('developerRepo'),
   developerBuildVersion: document.getElementById('developerBuildVersion'),
-  watermarkVersion: document.getElementById('watermarkVersion')
+  watermarkVersion: document.getElementById('watermarkVersion'),
+  // Changelog / "What's new" dialog elements.
+  openChangelogBtn: document.getElementById('openChangelogBtn'),
+  changelogBackdrop: document.getElementById('changelogBackdrop'),
+  changelogModal: document.getElementById('changelogModal'),
+  changelogBody: document.getElementById('changelogBody'),
+  changelogCloseBtn: document.getElementById('changelogCloseBtn'),
+  changelogDismissBtn: document.getElementById('changelogDismissBtn')
 };
 
 export let activeFamily = 'entra';

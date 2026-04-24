@@ -1,5 +1,5 @@
 import {
-  state, dom, ROLE_FAMILIES, TENANT_KEYS, ROLES_CACHE_TTL_MS,
+  state, dom, ROLE_FAMILIES, TENANT_KEYS, ROLES_CACHE_TTL_MS, OPTIMISTIC_GRACE_MS,
   activeFamily, selectedTenantKey, isActivationRawOpen,
   setActiveFamily, setActivationRawOpen, setSelectedTenantKey,
   getPimClient, escapeHtml
@@ -105,6 +105,19 @@ function setRolesLoading(isLoading) {
   }
 }
 
+// Silent refresh button state: disable it and relabel to "Syncing…" so the
+// user gets a subtle hint that work is in progress without any skeleton /
+// wipe of existing rows. Pairs with the silent branch inside fetchAllRoles.
+const REFRESH_BTN_IDLE_LABEL = 'Refresh Roles';
+const REFRESH_BTN_SYNCING_LABEL = 'Syncing…';
+function setRefreshButtonSyncing(isSyncing) {
+  if (!dom.refreshBtn) {
+    return;
+  }
+  dom.refreshBtn.disabled = isSyncing;
+  dom.refreshBtn.textContent = isSyncing ? REFRESH_BTN_SYNCING_LABEL : REFRESH_BTN_IDLE_LABEL;
+}
+
 function setRolesStatus(message) {
   if (dom.rolesStatus) {
     dom.rolesStatus.textContent = message;
@@ -172,7 +185,10 @@ async function fetchRolesForFamily(tenantKey, family, loadToken) {
       return;
     }
 
-    state.rolesByTenantFamily[tenantKey][family] = roles;
+    state.rolesByTenantFamily[tenantKey][family] = mergeFamilyRoles(
+      state.rolesByTenantFamily[tenantKey][family] || [],
+      roles
+    );
     state.familyStatusByTenant[tenantKey][family] = 'ready';
   } catch (error) {
     if (loadToken !== state.activeRolesLoadToken) {
@@ -190,8 +206,83 @@ async function fetchRolesForFamily(tenantKey, family, loadToken) {
   }
 }
 
+// Merge a freshly-fetched role list from the backend into the existing local
+// list for one (tenant, family) bucket.
+//
+// Why merge instead of replace: after the user activates a role we flip it to
+// `state: 'active'` locally (see applyOptimisticActivation) and stamp it with
+// `optimisticActivatedAt`. Azure ARM's listing endpoints are eventually
+// consistent — a Refresh within ~30–90s of activation can return data that
+// does NOT yet include the just-activated row. A blind replace would drop the
+// role from the Active Roles panel and confuse the user.
+//
+// Rules:
+//  1. If backend returned the role (matched by id) → take the backend row as
+//     the new source of truth (fresh end time, resource, etc.).
+//  2. If backend did NOT return an existing role AND that role is a
+//     still-in-grace optimistic activation → keep the local row.
+//  3. Otherwise (backend dropped the role AND it's outside the grace window)
+//     → drop it locally too. This lets external revokes / expiries take
+//     effect once Azure has caught up.
+//  4. Any backend row with no local match is appended as-is.
+function mergeFamilyRoles(existingRoles, incomingRoles) {
+  const now = Date.now();
+  const incomingById = new Map();
+  for (const incoming of incomingRoles) {
+    if (incoming && incoming.id) {
+      incomingById.set(incoming.id, incoming);
+    }
+  }
+
+  const merged = [];
+  const consumedIncomingIds = new Set();
+
+  for (const existing of existingRoles) {
+    if (!existing || !existing.id) {
+      continue;
+    }
+
+    const incoming = incomingById.get(existing.id);
+    if (incoming) {
+      // Backend confirmed this role — carry forward the optimistic stamp so a
+      // second Refresh within the grace window is still protected if the
+      // listing briefly flickers.
+      const carriedStamp = existing.optimisticActivatedAt;
+      merged.push(carriedStamp ? { ...incoming, optimisticActivatedAt: carriedStamp } : incoming);
+      consumedIncomingIds.add(existing.id);
+      continue;
+    }
+
+    const isOptimisticActive =
+      existing.state === 'active' &&
+      typeof existing.optimisticActivatedAt === 'number' &&
+      now - existing.optimisticActivatedAt < OPTIMISTIC_GRACE_MS;
+
+    if (isOptimisticActive) {
+      // Protect the just-activated row from being wiped by a stale backend
+      // snapshot. The backend will catch up within the grace window.
+      merged.push(existing);
+    }
+    // else: drop — backend says it's gone and we have no reason to disbelieve.
+  }
+
+  for (const incoming of incomingRoles) {
+    if (incoming && incoming.id && !consumedIncomingIds.has(incoming.id)) {
+      merged.push(incoming);
+    }
+  }
+
+  return merged;
+}
+
 export async function fetchAllRoles(options = {}) {
   const force = Boolean(options.force);
+  // Silent refresh = no skeleton flash, no "loading" wipe. The current rows
+  // stay on screen; only the Refresh button is disabled and relabeled so the
+  // user knows work is in progress. We default to silent AFTER the first
+  // successful post-login load — that first load still uses the skeleton
+  // because there is nothing on screen worth preserving.
+  const silent = typeof options.silent === 'boolean' ? options.silent : state.isFirstLoadDone;
   const now = Date.now();
 
   if (!force && now < state.rolesCacheUntil && hasAnyCachedRoles()) {
@@ -204,7 +295,12 @@ export async function fetchAllRoles(options = {}) {
   const loadToken = state.activeRolesLoadToken + 1;
   state.activeRolesLoadToken = loadToken;
   state.rolesCacheUntil = 0;
-  setRolesLoading(true);
+
+  if (silent) {
+    setRefreshButtonSyncing(true);
+  } else {
+    setRolesLoading(true);
+  }
 
   for (const tenantKey of TENANT_KEYS) {
     for (const family of ROLE_FAMILIES) {
@@ -213,8 +309,10 @@ export async function fetchAllRoles(options = {}) {
   }
 
   updateRoleTabsMeta();
-  renderHeaders();
-  renderLoadingRows();
+  if (!silent) {
+    renderHeaders();
+    renderLoadingRows();
+  }
   setRolesStatus('Pulling roles across Entra, Azure Resources, and Groups...');
 
   const tasks = [];
@@ -229,7 +327,11 @@ export async function fetchAllRoles(options = {}) {
     return;
   }
 
-  setRolesLoading(false);
+  if (silent) {
+    setRefreshButtonSyncing(false);
+  } else {
+    setRolesLoading(false);
+  }
 
   const loadedFamilies = [];
   const failedFamilies = [];
@@ -247,6 +349,7 @@ export async function fetchAllRoles(options = {}) {
 
   if (loadedFamilies.length > 0) {
     state.rolesCacheUntil = Date.now() + ROLES_CACHE_TTL_MS;
+    state.isFirstLoadDone = true;
   }
 
   const totalTenantFamilyCombos = TENANT_KEYS.length * ROLE_FAMILIES.length;
@@ -497,9 +600,9 @@ export function renderActiveRoles() {
   }
 
   if (totalActiveCount === 0) {
-    dom.activeRolesList.innerHTML = '<div class="empty-roles">No active roles in any category.</div>';
+    dom.activeRolesList.innerHTML = '<div class="empty-roles">No active roles in any category</div>';
     if (dom.activeRolesStatus) {
-      dom.activeRolesStatus.textContent = 'No active roles.';
+      dom.activeRolesStatus.textContent = 'No active roles';
     }
     return;
   }
@@ -524,14 +627,26 @@ export function renderActiveRoles() {
         ? `<span class="active-role-timer">${escapeHtml(expiryBadge)}</span>`
         : '';
 
+      // Layout: role name + (optional expiry badge) + Deactivate button all
+      // on the SAME top row to keep cards compact. Details below.
       item.innerHTML = `
         <div class="active-role-topline">
           <p class="active-role-name">${escapeHtml(role.displayName)}</p>
-          ${badgeMarkup}
+          <div class="active-role-topline-right">
+            ${badgeMarkup}
+            <button type="button" class="active-role-deactivate-btn" data-role-id="${escapeHtml(role.id)}" data-tenant-key="${escapeHtml(role.tenantKey)}" data-family="${escapeHtml(role.family)}">Deactivate</button>
+          </div>
         </div>
         <p class="active-role-context">${escapeHtml(getActiveRoleContextLine(role))}</p>
         <p class="active-role-endtime">End time: ${escapeHtml(role.endTime)}</p>
       `;
+
+      // Wire the Deactivate button. Each render rebuilds the DOM so we don't
+      // need to worry about stale handlers — the previous element is gone.
+      const deactivateBtn = item.querySelector('.active-role-deactivate-btn');
+      if (deactivateBtn) {
+        deactivateBtn.addEventListener('click', () => deactivateActiveRole(role));
+      }
 
       listElement.appendChild(item);
     }
@@ -542,6 +657,114 @@ export function renderActiveRoles() {
 
   if (dom.activeRolesStatus) {
     dom.activeRolesStatus.textContent = `${totalActiveCount} active role(s).`;
+  }
+
+  // Schedule (or refresh) per-role expiry timers so the UI flips to "Expired"
+  // exactly when each role's endTimeIso is reached, with no polling required.
+  scheduleActiveRoleExpiryTimers(groupedActiveRoles);
+}
+
+// ── Active role expiry timers (zero-poll) ──
+//
+// Strategy: one setTimeout per active role, scheduled at (endTimeIso - now).
+// When it fires:
+//   1. Re-render Active Roles (the existing badge logic flips to "Expired").
+//   2. Trigger a silent backend refresh so the role disappears entirely once
+//      Azure confirms it's gone.
+//
+// We track timers in state.expiryTimers (Map<roleId, handle>). Every render
+// reconciles: keep timers for roles still present, clear timers for roles
+// that vanished. setTimeout is paused when the OS sleeps and fires "late" on
+// wake — that's fine here, the Expired badge just appears a bit late, and
+// the safety net (focus refresh) will catch up immediately.
+const MAX_TIMER_DELAY_MS = 24 * 60 * 60 * 1000; // 24 hours — guard against absurd schedules.
+
+function scheduleActiveRoleExpiryTimers(groupedActiveRoles) {
+  const currentActiveIds = new Set();
+  for (const familyGroup of groupedActiveRoles) {
+    for (const role of familyGroup.roles) {
+      currentActiveIds.add(role.id);
+      const endTimeMs = role.endTimeIso ? Date.parse(role.endTimeIso) : NaN;
+      if (!Number.isFinite(endTimeMs)) {
+        continue;
+      }
+      // Already expired by the clock — no timer needed. The next render will
+      // either show "Expired" or the silent refresh will drop it.
+      if (endTimeMs <= Date.now()) {
+        continue;
+      }
+      // Already have a live timer for this role — leave it alone.
+      if (state.expiryTimers.has(role.id)) {
+        continue;
+      }
+      const delay = Math.min(MAX_TIMER_DELAY_MS, endTimeMs - Date.now());
+      const handle = setTimeout(() => {
+        state.expiryTimers.delete(role.id);
+        // Re-render so the badge flips to "Expired" immediately. We do NOT
+        // trigger a backend refresh here — this app is user-initiated only,
+        // so the row will sit there labeled "Expired" until the user clicks
+        // Refresh. That's by design (predictable, no surprise Azure calls).
+        renderActiveRoles();
+      }, delay);
+      state.expiryTimers.set(role.id, handle);
+    }
+  }
+
+  // Clear timers for roles that are no longer active (e.g. user just
+  // deactivated, or a refresh removed them).
+  for (const [id, handle] of state.expiryTimers) {
+    if (!currentActiveIds.has(id)) {
+      clearTimeout(handle);
+      state.expiryTimers.delete(id);
+    }
+  }
+}
+
+// ── Deactivation ──
+//
+// Self-deactivate an active role early. We optimistically remove the role
+// from local state so the Active Roles panel updates instantly, then call the
+// backend. If the backend call fails, we restore the role and show an error
+// — Azure is the source of truth.
+async function deactivateActiveRole(role) {
+  if (!role || !role.id) {
+    return;
+  }
+
+  const tenantKey = role.tenantKey;
+  const family = role.family;
+  const familyBucket = state.rolesByTenantFamily[tenantKey]?.[family];
+  if (!Array.isArray(familyBucket)) {
+    return;
+  }
+
+  const removalIndex = familyBucket.findIndex((entry) => entry.id === role.id);
+  if (removalIndex < 0) {
+    return;
+  }
+
+  // Snapshot the role before removing so we can roll back if the API fails.
+  const removedRole = familyBucket[removalIndex];
+  familyBucket.splice(removalIndex, 1);
+  renderActiveRoles();
+  renderRoles();
+  setActivationStatusMessage('Deactivating role...');
+
+  try {
+    const result = await getPimClient().deactivateRole({
+      tenantKey,
+      family,
+      roleId: role.id
+    });
+    const raw = `Deactivation submitted. Request: ${result.requestId}, status: ${result.status}`;
+    setActivationStatusMessage('Role is being deactivated', raw);
+  } catch (error) {
+    // Roll back local state — the role is still active in Azure.
+    familyBucket.splice(removalIndex, 0, removedRole);
+    renderActiveRoles();
+    renderRoles();
+    const raw = `Deactivation failed: ${String(error.message || error)}`;
+    setActivationStatusMessage('Unable to deactivate role. Please try again', raw);
   }
 }
 
@@ -576,11 +799,65 @@ async function activateRole(roleId) {
     const raw = `Activation submitted. Request: ${result.requestId}, status: ${result.status}`;
     const human = getHumanActivationMessage(raw, { statusHint: result.status, isError: false });
     setActivationStatusMessage(human, raw);
+
+    // Optimistic local update: if Azure accepted/granted/provisioned the
+    // request, flip this role to "active" in local state immediately so the
+    // Active Roles panel shows it without waiting for a Refresh round-trip.
+    // We compute an end time from the requested duration. The next backend
+    // refresh (focus, poll, or manual) will replace this with Azure's exact
+    // end time. Pending-approval activations are NOT flipped — they only
+    // move to active once Azure provisions them.
+    if (isImmediateActivationStatus(result.status)) {
+      applyOptimisticActivation(role, durationHours);
+    }
   } catch (error) {
     const raw = `Activation failed: ${String(error.message || error)}`;
     const human = getHumanActivationMessage(raw, { isError: true });
     setActivationStatusMessage(human, raw);
   }
+}
+
+// Returns true when Azure's response status indicates the activation has
+// already taken effect (vs awaiting approval). Azure uses several synonyms
+// for "granted" depending on the family — we accept any of them.
+function isImmediateActivationStatus(status) {
+  const normalized = String(status || '').toLowerCase();
+  return (
+    normalized.includes('granted') ||
+    normalized.includes('provisioned') ||
+    normalized.includes('accepted') ||
+    normalized.includes('schedulecreated')
+  );
+}
+
+// Mutates local state to flip the eligible role into an active role and
+// re-renders both panels. Safe to call multiple times — finds the existing
+// entry by id and only flips if it's currently eligible.
+function applyOptimisticActivation(eligibleRole, durationHours) {
+  const tenantKey = eligibleRole.tenantKey;
+  const family = eligibleRole.family;
+  const familyBucket = state.rolesByTenantFamily[tenantKey]?.[family];
+  if (!Array.isArray(familyBucket)) {
+    return;
+  }
+
+  const target = familyBucket.find((entry) => entry.id === eligibleRole.id);
+  if (!target || target.state === 'active') {
+    return;
+  }
+
+  const endTimeMs = Date.now() + Math.max(0, Number(durationHours) || 0) * 3600 * 1000;
+  const endTimeIso = new Date(endTimeMs).toISOString();
+  target.state = 'active';
+  target.endTimeIso = endTimeIso;
+  target.endTime = new Date(endTimeMs).toLocaleString();
+  // Stamp the moment of the optimistic flip. mergeFamilyRoles uses this to
+  // preserve the row across any Refresh that hits while Azure's listing
+  // endpoint is still catching up (see OPTIMISTIC_GRACE_MS).
+  target.optimisticActivatedAt = Date.now();
+
+  renderActiveRoles();
+  renderRoles();
 }
 
 // ── Login & tenant ──
@@ -626,7 +903,9 @@ export function wireRolesUI() {
   document.getElementById('loginBtn').addEventListener('click', login);
 
   dom.refreshBtn.addEventListener('click', () => {
-    fetchAllRoles({ force: true });
+    // Manual refresh is always silent — the user already has rows on screen
+    // and shouldn't see a skeleton flash just to pick up any external changes.
+    fetchAllRoles({ force: true, silent: true });
   });
 
   for (const button of dom.tenantPresetButtons) {
@@ -699,4 +978,15 @@ export function wireRolesUI() {
       syncDurationControls(dom.durationHoursBoxInput.value);
     });
   }
+
+  // Cleanup on window unload — clear all per-role expiry timers so they don't
+  // fire after the renderer is torn down. There are no background pollers or
+  // intervals to stop: this app is "user-initiated refresh only" by design,
+  // so the only thing left to clean up is the per-role expiry setTimeout map.
+  window.addEventListener('beforeunload', () => {
+    for (const handle of state.expiryTimers.values()) {
+      clearTimeout(handle);
+    }
+    state.expiryTimers.clear();
+  });
 }

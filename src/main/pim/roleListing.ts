@@ -228,6 +228,16 @@ export async function listAzureResourceEligibleRoles(tenantKey: PimTenantKey, ar
   const subscriptionsResponse = await arm.get<ArmCollection<ArmSubscription>>('/subscriptions?api-version=2020-01-01');
   const roles: PimRole[] = [];
   const bySubscription = new Map(subscriptionsResponse.value.map((sub) => [sub.subscriptionId, sub.displayName]));
+
+  // Track every parent scope (management group / tenant root) seen on any
+  // eligibility row across all subscriptions. The ARM `$filter=asTarget()`
+  // filter returns inherited eligibilities at parent scopes when queried at a
+  // child subscription, BUT it does NOT return active assignments that live at
+  // those parent scopes (per
+  // https://learn.microsoft.com/rest/api/authorization/role-assignment-schedule-instances/list-for-scope:
+  // "asTarget() returns instances created for the current user"). So we need a
+  // second pass that queries assignment instances directly at each MG scope.
+  const parentScopesSeen = new Set<string>();
   const subscriptionIds = subscriptionsResponse.value.map((sub) => sub.subscriptionId);
 
   const results = await mapWithConcurrency(subscriptionIds, 10, async (subscriptionId) => {
@@ -249,6 +259,11 @@ export async function listAzureResourceEligibleRoles(tenantKey: PimTenantKey, ar
     if (eligibilityResponse.status === 'fulfilled') {
       for (const entry of eligibilityResponse.value.value) {
         const scope = entry.properties?.scope ?? `/subscriptions/${subscriptionId}`;
+        // Track non-subscription (i.e. management group / tenant root) scopes
+        // so the second pass below can also query their assignment instances.
+        if (isParentScope(scope)) {
+          parentScopesSeen.add(scope);
+        }
         const parsedScope = parseAzureScope(scope, subscriptionLabel);
         const roleDefinitionId = entry.properties?.roleDefinitionId ?? '';
         const principalId = entry.properties?.principalId ?? '';
@@ -302,6 +317,23 @@ export async function listAzureResourceEligibleRoles(tenantKey: PimTenantKey, ar
 
     if (assignmentResponse.status === 'fulfilled') {
       for (const entry of assignmentResponse.value.value) {
+        // Azure ARM returns TWO kinds of role assignment instances from this endpoint:
+        //   1. assignmentType === 'Activated' → a temporary activation born from a PIM
+        //      eligibility (this is what "Active Roles" should show).
+        //   2. assignmentType === 'Assigned'  → a standing/permanent direct role
+        //      assignment that was never PIM-eligible (these must NOT appear in either
+        //      the Eligible Roles list or the Active Roles list).
+        //
+        // We also treat a missing linkedRoleEligibilityScheduleId as a strong signal
+        // of a direct (non-PIM) assignment, in case assignmentType is absent on some
+        // tenants/regions. Both checks together = belt-and-suspenders filtering.
+        const assignmentType = entry.properties?.assignmentType;
+        const linkedScheduleId = normalizeScheduleId(entry.properties?.linkedRoleEligibilityScheduleId);
+        const isPimActivation = assignmentType === 'Activated' || Boolean(linkedScheduleId);
+        if (!isPimActivation) {
+          continue;
+        }
+
         const scope = entry.properties?.scope ?? `/subscriptions/${subscriptionId}`;
         const parsedScope = parseAzureScope(scope, subscriptionLabel);
         const roleDefinitionId = entry.properties?.roleDefinitionId ?? '';
@@ -311,21 +343,59 @@ export async function listAzureResourceEligibleRoles(tenantKey: PimTenantKey, ar
           entry.properties?.expandedProperties?.roleDefinition?.displayName ||
           (roleGuid ? KNOWN_AZURE_ROLE_NAMES[roleGuid] : undefined) ||
           'Azure Role';
-        const linkedScheduleId = normalizeScheduleId(entry.properties?.linkedRoleEligibilityScheduleId);
         const semanticWithPrincipal = `${principalId}|${roleDefinitionId}|${scope}`;
         const semanticWithoutPrincipal = `${roleDefinitionId}|${scope}`;
+
+        // Try to pair this activation back to the eligibility row we already indexed
+        // (preferred path — keeps a stable id and inherits membership/source fields).
         const existing =
           (linkedScheduleId ? eligibleByScheduleId.get(linkedScheduleId) : undefined) ||
           eligibleBySemanticWithPrincipal.get(semanticWithPrincipal) ||
           eligibleBySemanticWithoutPrincipal.get(semanticWithoutPrincipal);
-        if (!existing) {
+
+        if (existing) {
+          const roleKey = `${existing.source.principalId ?? principalId}|${roleDefinitionId}|${scope}`;
+
+          roleMap.set(roleKey, {
+            id: existing.id,
+            tenantKey,
+            tenantLabel: TENANT_KEY_TO_LABEL[tenantKey],
+            family: 'azureResource',
+            displayName: roleName,
+            scope,
+            resource: parsedScope.resource,
+            resourceType: parsedScope.resourceType,
+            membership: existing.membership,
+            endTime: entry.properties?.endDateTime ? new Date(entry.properties.endDateTime).toLocaleString() : existing.endTime,
+            endTimeIso: entry.properties?.endDateTime ?? existing.endTimeIso,
+            state: 'active',
+            source: {
+              roleEligibilityScheduleId: existing.source.roleEligibilityScheduleId || linkedScheduleId,
+              subscriptionId
+            }
+          });
           continue;
         }
 
-        const roleKey = `${existing.source.principalId ?? principalId}|${roleDefinitionId}|${scope}`;
+        // Fallback: this is a real PIM activation but its eligibility row is not
+        // visible at this subscription's $filter=asTarget() view. This is the normal
+        // case for management-group-scope eligibilities and for group-based PIM,
+        // where the eligibility lives at a higher scope but the activation is
+        // inherited down to the subscription. Synthesize an active role directly
+        // from the activation so it still surfaces under "Active Roles".
+        const fallbackScheduleId = linkedScheduleId || normalizeScheduleId(entry.id || entry.name);
+        const synthesizedTarget = encodeURIComponent(
+          JSON.stringify({
+            scope,
+            linkedRoleEligibilityScheduleId: fallbackScheduleId,
+            principalId,
+            roleDefinitionId
+          })
+        );
+        const roleKey = `${principalId}|${roleDefinitionId}|${scope}`;
 
         roleMap.set(roleKey, {
-          id: existing.id,
+          id: synthesizedTarget,
           tenantKey,
           tenantLabel: TENANT_KEY_TO_LABEL[tenantKey],
           family: 'azureResource',
@@ -333,12 +403,14 @@ export async function listAzureResourceEligibleRoles(tenantKey: PimTenantKey, ar
           scope,
           resource: parsedScope.resource,
           resourceType: parsedScope.resourceType,
-          membership: existing.membership,
-          endTime: entry.properties?.endDateTime ? new Date(entry.properties.endDateTime).toLocaleString() : existing.endTime,
-          endTimeIso: entry.properties?.endDateTime ?? existing.endTimeIso,
+          membership: 'Group',
+          endTime: entry.properties?.endDateTime ? new Date(entry.properties.endDateTime).toLocaleString() : 'Permanent',
+          endTimeIso: entry.properties?.endDateTime,
           state: 'active',
           source: {
-            roleEligibilityScheduleId: existing.source.roleEligibilityScheduleId || linkedScheduleId,
+            roleEligibilityScheduleId: fallbackScheduleId,
+            principalId,
+            roleDefinitionId,
             subscriptionId
           }
         });
@@ -354,11 +426,138 @@ export async function listAzureResourceEligibleRoles(tenantKey: PimTenantKey, ar
     }
   }
 
+  // ── Second pass: query active assignments at each parent (MG) scope ──
+  //
+  // Why: ARM's `$filter=asTarget()` against `roleAssignmentScheduleInstances`
+  // only returns assignments whose principal IS the current user at THIS
+  // scope. It does not walk up the scope hierarchy for active assignments the
+  // way it does for eligibilities. So when a user activates a role that lives
+  // at an MG scope, the per-subscription query above will not see it. We have
+  // to ask the MG scope directly.
+  if (parentScopesSeen.size > 0) {
+    // Build a global eligibility index from everything the per-sub pass
+    // collected. The MG-scope active rows we are about to fetch may match an
+    // eligibility that was originally returned via a DIFFERENT subscription's
+    // inheritance view, so the index has to be global, not per-subscription.
+    const globalEligibleByScheduleId = new Map<string, PimRole>();
+    const globalEligibleBySemanticWithPrincipal = new Map<string, PimRole>();
+    const globalEligibleBySemanticWithoutPrincipal = new Map<string, PimRole>();
+    for (const role of roles) {
+      if (role.state !== 'eligible') {
+        continue;
+      }
+      const scheduleId = normalizeScheduleId(role.source.roleEligibilityScheduleId);
+      if (scheduleId) {
+        globalEligibleByScheduleId.set(scheduleId, role);
+      }
+      const principalId = role.source.principalId ?? '';
+      const roleDefinitionId = role.source.roleDefinitionId ?? '';
+      globalEligibleBySemanticWithPrincipal.set(`${principalId}|${roleDefinitionId}|${role.scope}`, role);
+      globalEligibleBySemanticWithoutPrincipal.set(`${roleDefinitionId}|${role.scope}`, role);
+    }
+
+    const parentScopes = Array.from(parentScopesSeen);
+    const parentResults = await mapWithConcurrency(parentScopes, 10, async (scope) => {
+      let assignmentResponse: ArmCollection<ArmRoleEligibility>;
+      try {
+        assignmentResponse = await arm.get<ArmCollection<ArmRoleEligibility>>(
+          `${scope}/providers/Microsoft.Authorization/roleAssignmentScheduleInstances?$filter=asTarget()&api-version=2020-10-01`
+        );
+      } catch {
+        // A 403/404 at this MG scope is not fatal — the user might not have
+        // read permission on every parent MG. Just skip and keep going.
+        return [] as PimRole[];
+      }
+
+      const parsedScope = parseAzureScope(scope, scope);
+      const activeRoles: PimRole[] = [];
+
+      for (const entry of assignmentResponse.value) {
+        // Same PIM-vs-permanent guard as the per-sub pass: only surface real
+        // activations (assignmentType === 'Activated' OR a linked eligibility
+        // schedule id is present). Standing/permanent direct assignments must
+        // not appear in either Eligible Roles or Active Roles.
+        const assignmentType = entry.properties?.assignmentType;
+        const linkedScheduleId = normalizeScheduleId(entry.properties?.linkedRoleEligibilityScheduleId);
+        const isPimActivation = assignmentType === 'Activated' || Boolean(linkedScheduleId);
+        if (!isPimActivation) {
+          continue;
+        }
+
+        const entryScope = entry.properties?.scope ?? scope;
+        const roleDefinitionId = entry.properties?.roleDefinitionId ?? '';
+        const principalId = entry.properties?.principalId ?? '';
+        const roleGuid = extractRoleGuid(roleDefinitionId);
+        const roleName =
+          entry.properties?.expandedProperties?.roleDefinition?.displayName ||
+          (roleGuid ? KNOWN_AZURE_ROLE_NAMES[roleGuid] : undefined) ||
+          'Azure Role';
+        const semanticWithPrincipal = `${principalId}|${roleDefinitionId}|${entryScope}`;
+        const semanticWithoutPrincipal = `${roleDefinitionId}|${entryScope}`;
+        const matchedEligibility =
+          (linkedScheduleId ? globalEligibleByScheduleId.get(linkedScheduleId) : undefined) ||
+          globalEligibleBySemanticWithPrincipal.get(semanticWithPrincipal) ||
+          globalEligibleBySemanticWithoutPrincipal.get(semanticWithoutPrincipal);
+
+        const fallbackScheduleId = linkedScheduleId || normalizeScheduleId(entry.id || entry.name);
+        const synthesizedTarget =
+          matchedEligibility?.id ??
+          encodeURIComponent(
+            JSON.stringify({
+              scope: entryScope,
+              linkedRoleEligibilityScheduleId: fallbackScheduleId,
+              principalId,
+              roleDefinitionId
+            })
+          );
+
+        activeRoles.push({
+          id: synthesizedTarget,
+          tenantKey,
+          tenantLabel: TENANT_KEY_TO_LABEL[tenantKey],
+          family: 'azureResource',
+          displayName: roleName,
+          scope: entryScope,
+          resource: parsedScope.resource,
+          resourceType: parsedScope.resourceType,
+          membership: matchedEligibility?.membership ?? 'Group',
+          endTime: entry.properties?.endDateTime
+            ? new Date(entry.properties.endDateTime).toLocaleString()
+            : matchedEligibility?.endTime ?? 'Permanent',
+          endTimeIso: entry.properties?.endDateTime ?? matchedEligibility?.endTimeIso,
+          state: 'active',
+          source: {
+            roleEligibilityScheduleId:
+              matchedEligibility?.source.roleEligibilityScheduleId || fallbackScheduleId,
+            principalId,
+            roleDefinitionId
+          }
+        });
+      }
+
+      return activeRoles;
+    });
+
+    for (const result of parentResults) {
+      if (result.status === 'fulfilled') {
+        roles.push(...result.value);
+      }
+    }
+  }
+
   const deduped = new Map<string, PimRole>();
   for (const role of roles) {
     const baseKey = role.source.roleEligibilityScheduleId || role.id;
     const key = `${baseKey}|${role.scope}`;
-    if (!deduped.has(key)) {
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, role);
+      continue;
+    }
+    // Prefer the active record over an eligible one when both surface for the
+    // same schedule+scope (e.g. MG-scope assignment returned from multiple
+    // subscriptions, or eligible-then-synthesized-active ordering).
+    if (existing.state !== 'active' && role.state === 'active') {
       deduped.set(key, role);
     }
   }
@@ -392,6 +591,15 @@ function normalizeScheduleId(value?: string): string {
   const normalized = value.trim().toLowerCase();
   const parts = normalized.split('/').filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : normalized;
+}
+
+// Returns true when the scope lives ABOVE the subscription level — i.e. a
+// management group or the tenant root. Per-subscription `asTarget()` queries
+// don't return active assignments at these scopes, so we have to query them
+// separately. Resource-group and individual-resource scopes are NOT parent
+// scopes — those are reachable from a per-subscription query.
+function isParentScope(scope: string): boolean {
+  return /\/providers\/Microsoft\.Management\/managementGroups\//i.test(scope);
 }
 
 function parseAzureScope(scope: string, subscriptionDisplayName: string): { resource: string; resourceType: string } {

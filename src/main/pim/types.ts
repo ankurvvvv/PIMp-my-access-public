@@ -49,6 +49,16 @@ export interface ActivateRoleRequest {
   justification: string;
 }
 
+// Self-deactivation request. Mirrors ActivateRoleRequest minus the duration
+// and justification (Azure does not require either when ending an activation
+// early). The roleId carries the same identity used during activation so the
+// backend can resolve scope, principal, and role definition the same way.
+export interface DeactivateRoleRequest {
+  tenantKey: PimTenantKey;
+  family: PimRoleFamily;
+  roleId: string;
+}
+
 export interface GraphActivationResult {
   id: string;
   status: string;

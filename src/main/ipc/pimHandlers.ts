@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { PimService } from '../pim/pimService';
-import type { ActivateRoleRequest, PimRoleFilter } from '../pim/types';
+import type { ActivateRoleRequest, DeactivateRoleRequest, PimRoleFilter } from '../pim/types';
 import { updateService } from '../update/updateService';
+import { readChangelog } from '../changelog/changelogReader';
+import { ChangelogStateStore } from '../settings/changelogStateStore';
 
 const pimService = new PimService();
+const changelogStateStore = new ChangelogStateStore();
 
 export function registerPimHandlers(): void {
   ipcMain.handle('window:minimize', async (event) => {
@@ -65,5 +68,49 @@ export function registerPimHandlers(): void {
 
   ipcMain.handle('pim:activateRole', async (_event, request: ActivateRoleRequest) => {
     return pimService.activateRole(request);
+  });
+
+  ipcMain.handle('pim:deactivateRole', async (_event, request: DeactivateRoleRequest) => {
+    return pimService.deactivateRole(request);
+  });
+
+  // ── Changelog / "What's new" ──
+  // Renderer fetches the parsed CHANGELOG.md to render in the in-app dialog,
+  // and reads/writes the `lastSeenVersion` so we can auto-open the dialog
+  // exactly once after each version bump.
+
+  ipcMain.handle('changelog:get', async () => {
+    const payload = readChangelog();
+    return {
+      ...payload,
+      currentVersion: app.getVersion()
+    };
+  });
+
+  ipcMain.handle('changelog:getLastSeenVersion', async () => {
+    const state = changelogStateStore.load();
+    return state.lastSeenVersion;
+  });
+
+  ipcMain.handle('changelog:markSeen', async (_event, version?: string) => {
+    const versionToStore = typeof version === 'string' && version.length > 0
+      ? version
+      : app.getVersion();
+    changelogStateStore.save({ lastSeenVersion: versionToStore });
+  });
+
+  // Open external URLs (e.g. Keep-A-Changelog reference) safely in the user's
+  // default browser. Renderer cannot call shell.openExternal directly because
+  // the renderer is sandboxed (contextIsolation: true, nodeIntegration: false).
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    if (typeof url !== 'string') {
+      return;
+    }
+    // Allowlist: only http/https. Prevents file:// or javascript: scheme abuse
+    // if a malicious changelog ever sneaks in.
+    if (!/^https?:\/\//i.test(url)) {
+      return;
+    }
+    await shell.openExternal(url);
   });
 }

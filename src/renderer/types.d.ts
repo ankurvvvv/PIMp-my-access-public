@@ -72,6 +72,24 @@ declare global {
         durationHours: number;
         justification: string;
       }) => Promise<{ requestId: string; status: string }>;
+      deactivateRole: (request: {
+        tenantKey: 'nuance' | 'healthcareCloud';
+        family: 'entra' | 'azureResource' | 'group';
+        roleId: string;
+      }) => Promise<{ requestId: string; status: string }>;
+      getChangelog: () => Promise<{
+        entries: Array<{
+          version: string;
+          date: string;
+          sections: Array<{ heading: string; items: string[] }>;
+        }>;
+        found: boolean;
+        sourcePath: string;
+        currentVersion: string;
+      }>;
+      getLastSeenChangelogVersion: () => Promise<string>;
+      markChangelogSeen: (version?: string) => Promise<void>;
+      openExternal: (url: string) => Promise<void>;
     };
   }
 }

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PIMp MY ACCESS</title>
+    <title>PIMp my access</title>
     <link rel="icon" type="image/png" href="../../assets/icons/app.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -14,8 +14,8 @@
     <div class="app-frame">
       <header class="titlebar" id="titlebar">
         <div class="brand drag-region">
-          <img class="brand-logo" src="../../assets/icons/app.png" alt="PIMp MY ACCESS" />
-          <span class="brand-title">PIMp MY ACCESS</span>
+          <img class="brand-logo" src="../../assets/icons/app.png" alt="PIMp my access" />
+          <span class="brand-title">PIMp my access</span>
           <span class="brand-sub">Azure Privileged Access</span>
         </div>
 
@@ -46,6 +46,14 @@
           </div>
           <p id="updateStatus" class="muted status-line">Update service is idle.</p>
           <p id="updateMeta" class="muted status-line update-meta"></p>
+        </section>
+
+        <section class="changelog-card" aria-label="What's new">
+          <h2>What's New</h2>
+          <p class="muted status-line">See what changed in this version of the app.</p>
+          <div class="row">
+            <button id="openChangelogBtn" class="ghost">What's new</button>
+          </div>
         </section>
 
         <section class="developer-card" aria-label="Developer information">
@@ -110,7 +118,7 @@
               <div class="row roles-header">
                 <div>
                   <h2>Eligible Roles</h2>
-                  <p class="muted roles-helper">Filter and activate your currently eligible roles.</p>
+                  <p class="muted roles-helper">Filter and activate your currently eligible roles</p>
                 </div>
                 <div class="row roles-controls">
                   <div class="roles-family-strip tenant-family-strip" role="tablist" aria-label="Tenant tabs">
@@ -134,7 +142,8 @@
                 </table>
               </div>
               <div class="roles-footer">
-                <p id="rolesStatus" class="muted roles-status-line">Sign in to load eligible roles.</p>
+                <p id="rolesStatus" class="muted roles-status-line">Sign in to load eligible roles</p>
+                <p class="muted roles-refresh-hint">Click Refresh to sync roles with Azure</p>
                 <button id="refreshBtn" class="ghost subtle-refresh">Refresh Roles</button>
               </div>
             </section>
@@ -143,7 +152,7 @@
               <div class="row roles-header">
                 <div>
                   <h2>Active Roles</h2>
-                  <p class="muted roles-helper">Grouped by family with role details and expiry.</p>
+                  <p class="muted roles-helper">Grouped by family with role details and expiry</p>
                 </div>
               </div>
               <div id="activeRolesList" class="active-roles-list"></div>
@@ -159,6 +168,20 @@
         <span id="updateToastMessage" class="update-toast-message"></span>
         <button id="updateToastAction" class="update-toast-action">Restart to update</button>
         <button id="updateToastDismiss" class="update-toast-dismiss icon-btn" aria-label="Dismiss">✕</button>
+      </div>
+
+      <!-- "What's new" modal. Shown on first launch after every version bump
+           and on demand from the Settings drawer button. -->
+      <div id="changelogBackdrop" class="changelog-backdrop" hidden></div>
+      <div id="changelogModal" class="changelog-modal" role="dialog" aria-modal="true" aria-labelledby="changelogTitle" hidden>
+        <div class="changelog-header">
+          <h2 id="changelogTitle">What's new</h2>
+          <button id="changelogCloseBtn" class="icon-btn" aria-label="Close">✕</button>
+        </div>
+        <div id="changelogBody" class="changelog-body"></div>
+        <div class="changelog-footer">
+          <button id="changelogDismissBtn" class="primary">Got it</button>
+        </div>
       </div>
     </div>
 
